@@ -863,6 +863,12 @@ function New-ScaleHCOSVM {
         [string]$NetworkType = "VIRTIO",
         
         [Parameter(Mandatory = $false)]
+        [int[]]$VLAN,
+        
+        [Parameter(Mandatory = $false)]
+        [string[]]$Tags,
+        
+        [Parameter(Mandatory = $false)]
         [switch]$AttachGuestToolsISO,
         
         [Parameter(Mandatory = $false)]
@@ -894,6 +900,26 @@ function New-ScaleHCOSVM {
         # Construct API URL
         $ScaleCluster = "https://$Server/rest/v1"
         
+        # Build network devices configuration
+        $networkDevices = @()
+        
+        if ($VLAN -and $VLAN.Count -gt 0) {
+            # Create one network device per VLAN
+            foreach ($vlanId in $VLAN) {
+                $networkDevices += @{
+                    type = $NetworkType
+                    vlan = $vlanId
+                }
+                Write-ScaleHCOSLog -Message "Adding network adapter with VLAN $vlanId" -Level 'Info'
+            }
+        } else {
+            # Create a single network device with no VLAN
+            $networkDevices += @{
+                type = $NetworkType
+            }
+            Write-ScaleHCOSLog -Message "Adding network adapter with no VLAN tag" -Level 'Info'
+        }
+        
         # Build VM creation request body
         $vmRequest = @{
             dom = @{
@@ -908,13 +934,16 @@ function New-ScaleHCOSVM {
                         cacheMode = $DiskCacheMode
                     }
                 )
-                netDevs = @(
-                    @{
-                        type = $NetworkType
-                    }
-                )
+                netDevs = $networkDevices
             }
             options = @{}
+        }
+        
+        # Add tags if provided - convert the array to a single comma-separated string
+        if ($Tags -and $Tags.Count -gt 0) {
+            $tagsString = $Tags -join ','
+            Write-ScaleHCOSLog -Message "Adding tags to VM: $tagsString" -Level 'Info'
+            $vmRequest.dom.tags = $tagsString
         }
         
         # Add guest tools ISO option if requested
@@ -1100,6 +1129,9 @@ function New-ScaleHCOSVM {
             MemoryGB = $MemoryGB
             PrimaryDiskSizeGB = $PrimaryDiskSizeGB
             SecondaryDiskSizeGB = $SecondaryDiskSizeGB
+            VLANs = $VLAN
+            Tags = $Tags
+            NetworkCards = $networkDevices.Count
             CreationTaskTag = $taskTag
             Server = $Server
         }
@@ -1114,6 +1146,8 @@ function New-ScaleHCOSVM {
     }
 }
 
+# Add the new function to the module exports
+Export-ModuleMember -Function New-ScaleHCOSVM
 
 try {
     Initialize-ScaleHCOSEnvironment
