@@ -723,7 +723,11 @@ function Get-ScaleHCOSVMInventory {
         [string]$NodeUUID,
         
         [Parameter(Mandatory = $false, ParameterSetName='TagFilter')]
-        [string]$Tag
+        [string]$Tag,
+        
+        [Parameter(Mandatory = $false, ParameterSetName='PowerStateFilter')]
+        [ValidateSet("RUNNING", "STOPPED", "STOPPING", "STARTING", "PAUSED", "MIGRATING", "MAINTENANCE")]
+        [string]$PowerState
     )
     
     try {
@@ -770,6 +774,10 @@ function Get-ScaleHCOSVMInventory {
                     $VMInfo = $VMInfo | Where-Object { $_.tags -contains $Tag }
                     Write-ScaleHCOSLog -Message "Filtered VMs by Tag '$Tag'. Found $($VMInfo.Count) matches." -Level 'Info'
                 }
+                'PowerStateFilter' {
+                    $VMInfo = $VMInfo | Where-Object { $_.state -eq $PowerState }
+                    Write-ScaleHCOSLog -Message "Filtered VMs by Power State '$PowerState'. Found $($VMInfo.Count) matches." -Level 'Info'
+                }
             }
         }
         
@@ -792,11 +800,13 @@ function Get-ScaleHCOSVMInventory {
                 "Tags"                = if ($VM.tags) { $VM.tags -join "; " } else { $null }
                 "Machine Type"        = $VM.machineType
                 "Guest Agent State"   = $VM.guestAgentState
-                "Memory (B)"         = $VM.mem
+                "Memory (MB)"         = $VM.mem
                 "CPU Count"           = $VM.numVCPU
                 "Boot Order"          = if ($VM.bootDevices) { $VM.bootDevices -join ", " } else { $null }
                 "MAC Addresses"       = ($VM.netDevs | ForEach-Object { $_.macAddress }) -join "; "
                 "Network Cards"       = ($VM.netDevs | Measure-Object).Count
+                "VLANs"               = ($VM.netDevs | ForEach-Object { $_.vlan }) -join ", "
+                "Disks"               = ($VM.blockDevs | Measure-Object).Count
             }
         }
         
