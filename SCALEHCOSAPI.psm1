@@ -459,6 +459,7 @@ function Remove-ScaleHCOSCredentials {
     Write-Host "Credentials for role '$credentialName' have been removed successfully." -ForegroundColor Green
 }
 
+
 function Invoke-ScaleHCOSRequest {
     [CmdletBinding()]
     param (
@@ -481,75 +482,86 @@ function Invoke-ScaleHCOSRequest {
         [switch]$Raw,
         
         [Parameter(Mandatory = $false)]
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$TimeoutSeconds = 300
     )
     
-    try {
-        $credential = Get-ScaleHCOSCredentials -Name $Role
-        
-        # Build REST options hashtable
-        $restOpts = @{
-            Uri = $Uri
-            Method = $Method
-            Credential = $credential
-            ContentType = 'application/json'
+    # Initialize credential and other variables
+    Write-Verbose "Getting credentials for role: $Role"
+    $credential = Get-ScaleHCOSCredentials -Name $Role
+    
+    # Build REST options hashtable
+    $restOpts = @{
+        Uri = $Uri
+        Method = $Method
+        Credential = $credential
+        ContentType = 'application/json'
+        TimeoutSec = $TimeoutSeconds
+    }
+    
+    # Add headers if specified
+    if ($AdditionalHeaders.Count -gt 0) {
+        $restOpts.Headers = $AdditionalHeaders
+    }
+    
+    # Add body if specified
+    if ($null -ne $Body) {
+        if ($Body -is [string]) {
+            $restOpts.Body = $Body
+        } else {
+            $restOpts.Body = $Body | ConvertTo-Json -Depth 10 -Compress
         }
+    }
+    
+    # Handle certificate validation for PowerShell Core
+    if ($SkipCertificateCheck -and $PSVersionTable.PSEdition -eq 'Core') {
+        $restOpts.SkipCertificateCheck = $true
+    }
+    
+    # Handle certificate validation for Windows PowerShell
+    if ($SkipCertificateCheck -and $PSVersionTable.PSEdition -ne 'Core') {
+        Write-ScaleHCOSLog -Message "Using certificate validation bypass in Windows PowerShell" -Level 'Warning'
         
-        # Add headers if specified
-        if ($AdditionalHeaders.Count -gt 0) {
-            $restOpts.Headers = $AdditionalHeaders
-        }
-        
-        # Add body if specified
-        if ($null -ne $Body) {
-            if ($Body -is [string]) {
-                $restOpts.Body = $Body
-            } else {
-                $restOpts.Body = $Body | ConvertTo-Json -Depth 10 -Compress
-            }
-        }
-        
-        # Handle certificate validation based on PowerShell version
-        if ($SkipCertificateCheck) {
-            if ($PSVersionTable.PSEdition -eq 'Core') {
-                # PowerShell Core has SkipCertificateCheck parameter
-                $restOpts.SkipCertificateCheck = $true
-            } else {
-                # Windows PowerShell requires callback
-                Write-ScaleHCOSLog -Message "Using certificate validation bypass in Windows PowerShell" -Level 'Warning'
-                
-                # Create callback to ignore certificate validation
+        if (-not ([System.Management.Automation.PSTypeName]'TrustAllCertsPolicy').Type) {
+            try {
                 Add-Type -TypeDefinition @"
-                    using System.Net;
-                    using System.Security.Cryptography.X509Certificates;
-                    public class TrustAllCertsPolicy : ICertificatePolicy {
-                        public bool CheckValidationResult(
-                            ServicePoint srvPoint, X509Certificate certificate,
-                            WebRequest request, int certificateProblem) {
-                            return true;
-                        }
+                using System.Net;
+                using System.Security.Cryptography.X509Certificates;
+                public class TrustAllCertsPolicy : ICertificatePolicy {
+                    public bool CheckValidationResult(
+                        ServicePoint srvPoint, X509Certificate certificate,
+                        WebRequest request, int certificateProblem) {
+                        return true;
                     }
-"@
-                [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
-                
-                # Set security protocol to TLS 1.2
-                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                }
+"@ -ErrorAction SilentlyContinue
+            }
+            catch {
+                Write-Verbose "TrustAllCertsPolicy type already exists or could not be created: $_"
             }
         }
         
-        # Log request (excluding sensitive information)
-        $logMessage = "Sending $Method request to $Uri"
-        Write-ScaleHCOSLog -Message $logMessage -Level 'Info'
-        
-        # Make the REST call
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    }
+    
+    # Log request
+    $logMessage = "Sending $Method request to $Uri with timeout of $TimeoutSeconds seconds"
+    Write-ScaleHCOSLog -Message $logMessage -Level 'Info'
+    Write-Verbose $logMessage
+    
+    # Direct execution with error handling
+    try {
+        # Make the direct REST call
         $response = Invoke-RestMethod @restOpts
         
-        # Return raw response or process it
-        if ($Raw) {
-            return $response
-        } else {
-            return $response
-        }
+        # Log successful completion
+        Write-ScaleHCOSLog -Message "REST request completed successfully" -Level 'Info'
+        
+        # Explicitly output the response
+        $response
     }
     catch {
         $errorMessage = "REST request failed: $_"
@@ -685,6 +697,121 @@ function Get-ScaleHCOSNodeInventory {
         throw $_
     }
 }
+
+function Get-ScaleHCOSVMInventory {
+    [CmdletBinding(DefaultParameterSetName='Default')]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Role = "Administrator",
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$Raw,
+        
+        [Parameter(Mandatory = $false, ParameterSetName='NameFilter')]
+        [string]$Name,
+        
+        [Parameter(Mandatory = $false, ParameterSetName='UUIDFilter')]
+        [string]$UUID,
+        
+        [Parameter(Mandatory = $false, ParameterSetName='NodeFilter')]
+        [string]$NodeUUID,
+        
+        [Parameter(Mandatory = $false, ParameterSetName='TagFilter')]
+        [string]$Tag
+    )
+    
+    try {
+        Write-ScaleHCOSLog -Message "Getting VM inventory for server: $Server" -Level 'Info'
+        
+        $ScaleCluster = "https://$Server/rest/v1"
+        
+        # Get VM information
+        $params = @{
+            Uri = "$ScaleCluster/VirDomain"
+            Role = $Role
+            Method = 'GET'
+        }
+        
+        if ($SkipCertificateCheck) {
+            $params.Add('SkipCertificateCheck', $true)
+        }
+        
+        $VMInfo = Invoke-ScaleHCOSRequest @params
+        
+        if ($null -eq $VMInfo) {
+            Write-Warning "No VM information returned from $Server"
+            return $null
+        }
+        
+        # Apply filtering based on parameters
+        if ($PSCmdlet.ParameterSetName -ne 'Default' -and -not $Raw) {
+            Write-ScaleHCOSLog -Message "Filtering VM inventory data using filter: $($PSCmdlet.ParameterSetName)" -Level 'Info'
+            
+            switch ($PSCmdlet.ParameterSetName) {
+                'NameFilter' {
+                    $VMInfo = $VMInfo | Where-Object { $_.name -like "*$Name*" }
+                    Write-ScaleHCOSLog -Message "Filtered VMs by name pattern '*$Name*'. Found $($VMInfo.Count) matches." -Level 'Info'
+                }
+                'UUIDFilter' {
+                    $VMInfo = $VMInfo | Where-Object { $_.UUID -eq $UUID }
+                    Write-ScaleHCOSLog -Message "Filtered VMs by UUID '$UUID'. Found $($VMInfo.Count) matches." -Level 'Info'
+                }
+                'NodeFilter' {
+                    $VMInfo = $VMInfo | Where-Object { $_.nodeUUID -eq $NodeUUID }
+                    Write-ScaleHCOSLog -Message "Filtered VMs by Node UUID '$NodeUUID'. Found $($VMInfo.Count) matches." -Level 'Info'
+                }
+                'TagFilter' {
+                    $VMInfo = $VMInfo | Where-Object { $_.tags -contains $Tag }
+                    Write-ScaleHCOSLog -Message "Filtered VMs by Tag '$Tag'. Found $($VMInfo.Count) matches." -Level 'Info'
+                }
+            }
+        }
+        
+        # Return raw results if requested
+        if ($Raw) {
+            return $VMInfo
+        }
+        
+        Write-ScaleHCOSLog -Message "Processing VM inventory data for $(($VMInfo | Measure-Object).Count) VMs" -Level 'Info'
+        
+        # Process the VM information into a more readable format
+        $VMInventory = foreach ($VM in $VMInfo) {
+            [PSCustomObject]@{
+                "VM Name"             = $VM.name
+                UUID                  = $VM.UUID
+                "Power State"         = $VM.state
+                "Desired Power State" = $VM.desiredState
+                "Host Node"           = $VM.nodeUUID
+                "Description"         = $VM.description
+                "Tags"                = if ($VM.tags) { $VM.tags -join "; " } else { $null }
+                "Machine Type"        = $VM.machineType
+                "Guest Agent State"   = $VM.guestAgentState
+                "Memory (MB)"         = $VM.mem
+                "CPU Count"           = $VM.numVCPU
+                "Created"             = $VM.createdTime
+                "Updated"             = $VM.lastUpdatedTime
+                "Boot Order"          = if ($VM.bootDevices) { $VM.bootDevices -join ", " } else { $null }
+                "Auto Start"          = $VM.autoStartEnabled
+                "MAC Addresses"       = ($VM.netDevs | ForEach-Object { $_.macAddress }) -join "; "
+                "Network Cards"       = ($VM.netDevs | Measure-Object).Count
+            }
+        }
+        
+        return $VMInventory
+    }
+    catch {
+        $errorMessage = "Failed to retrieve VM inventory: $_"
+        Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+        throw $_
+    }
+}
+
 try {
     Initialize-ScaleHCOSEnvironment
 } catch {
@@ -693,4 +820,4 @@ try {
 }
 
 # Export module members - now including all functions
-Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory
+Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, Get-ScaleHCOSVMInventory
