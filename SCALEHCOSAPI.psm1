@@ -459,6 +459,232 @@ function Remove-ScaleHCOSCredentials {
     Write-Host "Credentials for role '$credentialName' have been removed successfully." -ForegroundColor Green
 }
 
+function Invoke-ScaleHCOSRequest {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Role,
+        
+        [Parameter(Mandatory = $false)]
+        [Microsoft.PowerShell.Commands.WebRequestMethod]$Method = 'GET',
+        
+        [Parameter(Mandatory = $false)]
+        [object]$Body = $null,
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$AdditionalHeaders = @{},
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$Raw,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck
+    )
+    
+    try {
+        $credential = Get-ScaleHCOSCredentials -Name $Role
+        
+        # Build REST options hashtable
+        $restOpts = @{
+            Uri = $Uri
+            Method = $Method
+            Credential = $credential
+            ContentType = 'application/json'
+        }
+        
+        # Add headers if specified
+        if ($AdditionalHeaders.Count -gt 0) {
+            $restOpts.Headers = $AdditionalHeaders
+        }
+        
+        # Add body if specified
+        if ($null -ne $Body) {
+            if ($Body -is [string]) {
+                $restOpts.Body = $Body
+            } else {
+                $restOpts.Body = $Body | ConvertTo-Json -Depth 10 -Compress
+            }
+        }
+        
+        # Handle certificate validation based on PowerShell version
+        if ($SkipCertificateCheck) {
+            if ($PSVersionTable.PSEdition -eq 'Core') {
+                # PowerShell Core has SkipCertificateCheck parameter
+                $restOpts.SkipCertificateCheck = $true
+            } else {
+                # Windows PowerShell requires callback
+                Write-ScaleHCOSLog -Message "Using certificate validation bypass in Windows PowerShell" -Level 'Warning'
+                
+                # Create callback to ignore certificate validation
+                Add-Type -TypeDefinition @"
+                    using System.Net;
+                    using System.Security.Cryptography.X509Certificates;
+                    public class TrustAllCertsPolicy : ICertificatePolicy {
+                        public bool CheckValidationResult(
+                            ServicePoint srvPoint, X509Certificate certificate,
+                            WebRequest request, int certificateProblem) {
+                            return true;
+                        }
+                    }
+"@
+                [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+                
+                # Set security protocol to TLS 1.2
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            }
+        }
+        
+        # Log request (excluding sensitive information)
+        $logMessage = "Sending $Method request to $Uri"
+        Write-ScaleHCOSLog -Message $logMessage -Level 'Info'
+        
+        # Make the REST call
+        $response = Invoke-RestMethod @restOpts
+        
+        # Return raw response or process it
+        if ($Raw) {
+            return $response
+        } else {
+            return $response
+        }
+    }
+    catch {
+        $errorMessage = "REST request failed: $_"
+        Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+        throw $_
+    }
+}
+
+function Get-ScaleHCOSNodeInventory {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Role = "Administrator",
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck
+    )
+    
+    try {
+        Write-ScaleHCOSLog -Message "Getting node inventory for server: $Server" -Level 'Info'
+        
+        $ScaleCluster = "https://$Server/rest/v1"
+        
+        # Get node information
+        $params = @{
+            Uri = "$ScaleCluster/Node"
+            Role = $Role
+            Method = 'GET'
+        }
+        
+        if ($SkipCertificateCheck) {
+            $params.Add('SkipCertificateCheck', $true)
+        }
+        
+        $NodeInfo = Invoke-ScaleHCOSRequest @params
+        
+        if ($null -eq $NodeInfo) {
+            Write-Warning "No node information returned from $Server"
+            return $null
+        }
+        
+        Write-ScaleHCOSLog -Message "Processing inventory data for $(($NodeInfo | Measure-Object).Count) nodes" -Level 'Info'
+        
+        $NodeInventory = foreach ($Node in $NodeInfo) {
+            # Process drive information
+            $driveModels = @()
+            $driveSerials = @()
+            $driveTypes = @()
+            $driveCapacities = @()
+            $driveUsages = @()
+            $driveHealths = @()
+            $driveErrors = @()
+            $drivePaths = @()
+            $driveTemps = @()
+            $driveMaxTemps = @()
+            
+            # Handle multiple drives if present
+            if ($Node.drives.Count -gt 0) {
+                foreach ($drive in $Node.drives) {
+                    # Process drive model by splitting on underscore and removing serial
+                    $driveParts = $drive.UUID -split '_'
+                    if ($driveParts.Count -gt 1) {
+                        $driveModel = ($driveParts[0..($driveParts.Count-2)] -join '_')
+                        $driveModels += $driveModel
+                    } else {
+                        $driveModels += $drive.UUID
+                    }
+                    
+                    $driveSerials += $drive.serialNumber
+                    $driveTypes += $drive.type
+                    $driveCapacities += $drive.capacityBytes
+                    $driveUsages += $drive.usedBytes
+                    $driveHealths += $drive.isHealthy
+                    $driveErrors += $drive.errorCount
+                    $drivePaths += $drive.blockDevicePath
+                    $driveTemps += $drive.temperature
+                    $driveMaxTemps += $drive.maxTemperature
+                }
+            }
+            
+            # Create the custom object with all node properties
+            [PSCustomObject]@{
+                UUID = $Node.UUID
+                "Backplane IP" = $Node.backplaneIP
+                "Lan IP" = $Node.lanIP
+                configState = $Node.configState  # Status of node configuration
+                activeVersion = $Node.activeVersion  # Current running HCOS version
+                "Array Capacity (B)" = $Node.capacity  # Total storage capacity available on the node
+                "Drive Model" = $driveModels -join '; '
+                "Drive Serial" = $driveSerials -join '; '
+                "Drive Type" = $driveTypes -join '; '
+                "Drive Capacity (B)" = $driveCapacities -join '; '
+                "Drive Usage (B)" = $driveUsages -join '; '
+                "Drive Health" = $driveHealths -join '; '
+                "Drive Errors" = $driveErrors -join '; '
+                "Drive Path" = $drivePaths -join '; '
+                "Drive Temperature" = $driveTemps -join '; '
+                "Drive Recorded Max Temp" = $driveMaxTemps -join '; '
+                vips = $Node.vips  # Virtual IPs assigned to this node
+                memSize = $Node.memSize
+                "CPU Count" = $Node.numCPUs
+                CPUhz = $Node.CPUhz  # CPU frequency in Hz
+                numNUMANodes = $Node.numNUMANodes  # Number of NUMA nodes in system
+                "CPU Sockets" = $Node.numSockets
+                "CPU Cores" = $Node.numCores
+                "CPU Threads" = $Node.numThreads
+                "Network Status" = $Node.networkStatus
+                supportsVirtualization = $Node.supportsVirtualization
+                virtualizationOnline = $Node.virtualizationOnline
+                pairedNodeUUID = $Node.pairedNodeUUID  # UUID of the paired node in HA configuration
+                scribeInstanceName = $Node.scribeInstanceName  # Internal system component name
+                "Node ID" = $Node.peerID 
+                "RAM Slots" = $Node.numSlots
+                "System RAM Usage (B)" = $Node.systemMemUsageBytes
+                "RAM Usage (%)" = $Node.memUsagePercentage
+                "GPUs" = $Node.gpus
+                currentDisposition = $Node.currentDisposition
+                desiredDisposition = $Node.desiredDisposition
+                "CPU Usage (%)" = $Node.cpuUsage
+                "Total RAM Usages (B)" = $Node.totalMemUsageBytes
+                "Allow VMs to Run" = $Node.allowRunningVMs
+            }
+        }
+        
+        return $NodeInventory
+    }
+    catch {
+        $errorMessage = "Failed to retrieve node inventory: $_"
+        Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+        throw $_
+    }
+}
 try {
     Initialize-ScaleHCOSEnvironment
 } catch {
@@ -467,4 +693,4 @@ try {
 }
 
 # Export module members - now including all functions
-Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials
+Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory
