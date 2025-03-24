@@ -819,6 +819,302 @@ function Get-ScaleHCOSVMInventory {
     }
 }
 
+function New-ScaleHCOSVM {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Role = "Administrator",
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Description = "VM created via PowerShell module",
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(0.5, 4096)]
+        [double]$MemoryGB = 4,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 128)]
+        [int]$CPUCount = 4,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 65536)]
+        [double]$PrimaryDiskSizeGB = 10,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(0, 65536)]
+        [double]$SecondaryDiskSizeGB = 0,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("VIRTIO_DISK", "IDE_DISK", "SCSI_DISK")]
+        [string]$DiskType = "VIRTIO_DISK",
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("WRITETHROUGH", "WRITEBACK", "NONE")]
+        [string]$DiskCacheMode = "WRITETHROUGH",
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("VIRTIO", "E1000", "RTL8139")]
+        [string]$NetworkType = "VIRTIO",
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$AttachGuestToolsISO,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$Wait,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$TimeoutSeconds = 300
+    )
+    
+    try {
+        Write-ScaleHCOSLog -Message "Creating new VM '$Name' on server $Server" -Level 'Info'
+        
+        # Validate parameters
+        if ($Name.Length -lt 1 -or $Name.Length -gt 80) {
+            throw "VM name must be between 1 and 80 characters"
+        }
+        
+        # Convert GB values to bytes for the API
+        $MemoryBytes = [math]::Round($MemoryGB * 1GB)
+        $PrimaryDiskSizeBytes = [math]::Round($PrimaryDiskSizeGB * 1GB)
+        $SecondaryDiskSizeBytes = [math]::Round($SecondaryDiskSizeGB * 1GB)
+        
+        Write-ScaleHCOSLog -Message "Converting $MemoryGB GB to $MemoryBytes bytes for memory allocation" -Level 'Info'
+        Write-ScaleHCOSLog -Message "Converting $PrimaryDiskSizeGB GB to $PrimaryDiskSizeBytes bytes for primary disk" -Level 'Info'
+        
+        # Construct API URL
+        $ScaleCluster = "https://$Server/rest/v1"
+        
+        # Build VM creation request body
+        $vmRequest = @{
+            dom = @{
+                name = $Name
+                description = $Description
+                mem = $MemoryBytes
+                numVCPU = $CPUCount
+                blockDevs = @(
+                    @{
+                        capacity = $PrimaryDiskSizeBytes
+                        type = $DiskType
+                        cacheMode = $DiskCacheMode
+                    }
+                )
+                netDevs = @(
+                    @{
+                        type = $NetworkType
+                    }
+                )
+            }
+            options = @{}
+        }
+        
+        # Add guest tools ISO option if requested
+        if ($AttachGuestToolsISO) {
+            $vmRequest.options.attachGuestToolsISO = $true
+        }
+        
+        # Step 1: Create the VM
+        Write-ScaleHCOSLog -Message "Sending VM creation request for '$Name'" -Level 'Info'
+        
+        $params = @{
+            Uri = "$ScaleCluster/VirDomain"
+            Role = $Role
+            Method = 'POST'
+            Body = $vmRequest
+        }
+        
+        if ($SkipCertificateCheck) {
+            $params.Add('SkipCertificateCheck', $true)
+        }
+        
+        $result = Invoke-ScaleHCOSRequest @params
+        
+        if ($null -eq $result -or $null -eq $result.createdUUID) {
+            throw "Failed to create VM. No UUID returned from API."
+        }
+        
+        $vmUUID = $result.createdUUID
+        $taskTag = $result.taskTag
+        
+        Write-ScaleHCOSLog -Message "VM '$Name' creation initiated with UUID: $vmUUID" -Level 'Info'
+        
+        # Wait for VM creation task to complete if Wait is specified
+        if ($Wait -and $taskTag) {
+            Write-ScaleHCOSLog -Message "Waiting for VM creation task to complete (TaskTag: $taskTag)" -Level 'Info'
+            
+            $taskComplete = $false
+            $startTime = Get-Date
+            $endTime = $startTime.AddSeconds($TimeoutSeconds)
+            
+            while (-not $taskComplete -and (Get-Date) -lt $endTime) {
+                $taskParams = @{
+                    Uri = "$ScaleCluster/TaskTag/$taskTag"
+                    Role = $Role
+                    Method = 'GET'
+                }
+                
+                if ($SkipCertificateCheck) {
+                    $taskParams.Add('SkipCertificateCheck', $true)
+                }
+                
+                $taskInfo = Invoke-ScaleHCOSRequest @taskParams
+                
+                if ($null -eq $taskInfo) {
+                    Write-ScaleHCOSLog -Message "Task $taskTag not found or returned null" -Level 'Warning'
+                    break
+                }
+                
+                $status = $taskInfo.state
+                
+                switch ($status) {
+                    "COMPLETE" {
+                        Write-ScaleHCOSLog -Message "Task $taskTag completed successfully" -Level 'Info'
+                        $taskComplete = $true
+                    }
+                    "ERROR" {
+                        $errorMessage = "Task $taskTag failed with error: $($taskInfo.errorMessage)"
+                        Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+                        throw $errorMessage
+                    }
+                    "PENDING" {
+                        # Still running, continue waiting
+                        Start-Sleep -Seconds 2
+                    }
+                    "RUNNING" {
+                        # Still running, continue waiting
+                        Start-Sleep -Seconds 2
+                    }
+                    default {
+                        Write-ScaleHCOSLog -Message "Task $taskTag in unknown state: $status" -Level 'Warning'
+                        Start-Sleep -Seconds 2
+                    }
+                }
+            }
+            
+            if (-not $taskComplete) {
+                $errorMessage = "Task $taskTag timed out after $TimeoutSeconds seconds"
+                Write-ScaleHCOSLog -Message $errorMessage -Level 'Warning'
+                throw $errorMessage
+            }
+        }
+        
+        # Step 2: Add secondary disk if specified
+        if ($SecondaryDiskSizeGB -gt 0) {
+            Write-ScaleHCOSLog -Message "Adding secondary disk of size $SecondaryDiskSizeGB GB to VM $vmUUID" -Level 'Info'
+            
+            $diskRequest = @{
+                virDomainUUID = $vmUUID
+                capacity = $SecondaryDiskSizeBytes
+                type = $DiskType
+                cacheMode = $DiskCacheMode
+            }
+            
+            $diskParams = @{
+                Uri = "$ScaleCluster/VirDomainBlockDevice"
+                Role = $Role
+                Method = 'POST'
+                Body = $diskRequest
+            }
+            
+            if ($SkipCertificateCheck) {
+                $diskParams.Add('SkipCertificateCheck', $true)
+            }
+            
+            $diskResult = Invoke-ScaleHCOSRequest @diskParams
+            
+            if ($Wait -and $diskResult.taskTag) {
+                $diskTaskTag = $diskResult.taskTag
+                Write-ScaleHCOSLog -Message "Waiting for secondary disk addition task to complete (TaskTag: $diskTaskTag)" -Level 'Info'
+                
+                $diskTaskComplete = $false
+                $diskStartTime = Get-Date
+                $diskEndTime = $diskStartTime.AddSeconds($TimeoutSeconds)
+                
+                while (-not $diskTaskComplete -and (Get-Date) -lt $diskEndTime) {
+                    $diskTaskParams = @{
+                        Uri = "$ScaleCluster/TaskTag/$diskTaskTag"
+                        Role = $Role
+                        Method = 'GET'
+                    }
+                    
+                    if ($SkipCertificateCheck) {
+                        $diskTaskParams.Add('SkipCertificateCheck', $true)
+                    }
+                    
+                    $diskTaskInfo = Invoke-ScaleHCOSRequest @diskTaskParams
+                    
+                    if ($null -eq $diskTaskInfo) {
+                        Write-ScaleHCOSLog -Message "Disk task $diskTaskTag not found or returned null" -Level 'Warning'
+                        break
+                    }
+                    
+                    $diskStatus = $diskTaskInfo.state
+                    
+                    switch ($diskStatus) {
+                        "COMPLETE" {
+                            Write-ScaleHCOSLog -Message "Disk task $diskTaskTag completed successfully" -Level 'Info'
+                            $diskTaskComplete = $true
+                        }
+                        "ERROR" {
+                            $errorMessage = "Disk task $diskTaskTag failed with error: $($diskTaskInfo.errorMessage)"
+                            Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+                            throw $errorMessage
+                        }
+                        "PENDING" {
+                            # Still running, continue waiting
+                            Start-Sleep -Seconds 2
+                        }
+                        "RUNNING" {
+                            # Still running, continue waiting
+                            Start-Sleep -Seconds 2
+                        }
+                        default {
+                            Write-ScaleHCOSLog -Message "Disk task $diskTaskTag in unknown state: $diskStatus" -Level 'Warning'
+                            Start-Sleep -Seconds 2
+                        }
+                    }
+                }
+                
+                if (-not $diskTaskComplete) {
+                    $errorMessage = "Disk task $diskTaskTag timed out after $TimeoutSeconds seconds"
+                    Write-ScaleHCOSLog -Message $errorMessage -Level 'Warning'
+                    throw $errorMessage
+                }
+            }
+        }
+        
+        # Return VM details
+        $vmDetails = [PSCustomObject]@{
+            VMName = $Name
+            UUID = $vmUUID
+            CPUCount = $CPUCount
+            MemoryGB = $MemoryGB
+            PrimaryDiskSizeGB = $PrimaryDiskSizeGB
+            SecondaryDiskSizeGB = $SecondaryDiskSizeGB
+            CreationTaskTag = $taskTag
+            Server = $Server
+        }
+        
+        Write-ScaleHCOSLog -Message "VM creation process completed successfully for VM '$Name' (UUID: $vmUUID)" -Level 'Info'
+        return $vmDetails
+    }
+    catch {
+        $errorMessage = "Failed to create VM: $_"
+        Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+        throw $_
+    }
+}
+
+
 try {
     Initialize-ScaleHCOSEnvironment
 } catch {
@@ -827,4 +1123,4 @@ try {
 }
 
 # Export module members - now including all functions
-Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, Get-ScaleHCOSVMInventory
+Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM
