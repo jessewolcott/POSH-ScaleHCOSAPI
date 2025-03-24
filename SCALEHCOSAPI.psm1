@@ -786,18 +786,15 @@ function Get-ScaleHCOSVMInventory {
                 "VM Name"             = $VM.name
                 UUID                  = $VM.UUID
                 "Power State"         = $VM.state
-                "Desired Power State" = $VM.desiredState
+                "Desired Power State" = $VM.desiredDisposition
                 "Host Node"           = $VM.nodeUUID
                 "Description"         = $VM.description
                 "Tags"                = if ($VM.tags) { $VM.tags -join "; " } else { $null }
                 "Machine Type"        = $VM.machineType
                 "Guest Agent State"   = $VM.guestAgentState
-                "Memory (MB)"         = $VM.mem
+                "Memory (B)"         = $VM.mem
                 "CPU Count"           = $VM.numVCPU
-                "Created"             = $VM.createdTime
-                "Updated"             = $VM.lastUpdatedTime
                 "Boot Order"          = if ($VM.bootDevices) { $VM.bootDevices -join ", " } else { $null }
-                "Auto Start"          = $VM.autoStartEnabled
                 "MAC Addresses"       = ($VM.netDevs | ForEach-Object { $_.macAddress }) -join "; "
                 "Network Cards"       = ($VM.netDevs | Measure-Object).Count
             }
