@@ -4,6 +4,8 @@ Powershell Module to interact with Scale Computing's HCOS API
 # Overview
 The ScaleHCOSAPI PowerShell module provides a secure and user-friendly interface for interacting with Scale Computing's Hypercore Operating System (HCOS) RESTful API. This module enables administrators to automate common management tasks for Scale Computing HC3 clusters.
 
+The reference doc for this can be found on your cluster at (https://{{ server }}/rest/v1/docs/). 
+
 # Features
 * Secure credential management for Scale Computing environments
 * Comprehensive logging system for troubleshooting and auditing
@@ -25,14 +27,14 @@ Import-Module .\SCALEHCOSAPI.psm1
 ## Credential Management
 The module provides secure credential storage for your Scale Computing environments:
 ```powershell
-# Register a new credential set
-Register-ScaleHCOSCredentials -Username "admin" -FriendlyName "HC3-Cluster1"
+# Register a new credential set - Use -Password to set up a credential file for later use. 
+Register-ScaleHCOSCredentials -Username "admin" -FriendlyName "Administrator"
 
 # Retrieve stored credentials
-$creds = Get-ScaleHCOSCredentials -FriendlyName "HC3-Cluster1"
+$creds = Get-ScaleHCOSCredentials -FriendlyName "Administrator"
 
 # Remove stored credentials
-Remove-ScaleHCOSCredentials -FriendlyName "HC3-Cluster1"
+Remove-ScaleHCOSCredentials -FriendlyName "Administrator"
 ```
 
 ## Basic Usage Examples
@@ -57,6 +59,60 @@ Get-ScaleHCOSVMInventory -Server "cluster.example.com" -Credential $creds |
     Where-Object { $_.Tags -match "production" } | 
     ForEach-Object { $_.UUID } | 
     New-ScaleHCOSVMSnapshot -Server "cluster.example.com" -Credential $creds -SnapshotLabel "Automated backup"
+```
+
+## Advanced Usage Examples
+
+### Create a VM with big splat for options
+
+```powershell
+
+$Credential = Get-ScaleHCOSCredentials -FriendlyName "Administrator"
+$Server = "cluster.example.com"
+
+$vmParams = @{
+    # Required parameters
+    Name                 = "TEST VM2"                             # Name of the new virtual machine
+        
+    # VM specifications
+    Description          = "Production VM created via PowerShell" # VM description (default: "VM created via PowerShell module")
+    tags                 = "LAB","WIN11","TPM Machines"           # Comma-separated list of tags (default: none)
+    MemoryGB             = 8                                      # Memory allocation in GB (default: 4)
+    CPUCount             = 4                                      # Number of virtual CPUs (default: 4)
+    
+    # Disk configuration
+    PrimaryDiskSizeGB    = 80                                 # Size of the primary disk in GB (default: 10)
+    SecondaryDiskSizeGB  = 200                                # Size of optional secondary disk in GB (default: 0)
+    DiskType             = "VIRTIO_DISK"                      # Type of disk to create: VIRTIO_DISK, IDE_DISK, or SCSI_DISK (default: VIRTIO_DISK)
+    DiskCacheMode        = "WRITETHROUGH"                     # Disk caching mode: WRITETHROUGH, WRITEBACK, or NONE (default: WRITETHROUGH)
+    
+    # Network configuration
+    NetworkType          = "VIRTIO"                           # Network adapter type: VIRTIO, E1000, or RTL8139 (default: VIRTIO)
+    VLAN                 = @(5,20)                            # List of VLAN IDs as array (default: none)
+
+    # Disk Options
+    # AttachGuestToolsISO  = $true                            # Whether to attach guest tools ISO (default: $false) - NOT YET IMPLEMENTED
+    # Bootable Drive       =                                  # Select boot device - NOT YET IMPLEMENTED
+
+    # Connection options
+    SkipCertificateCheck = $true                              # Skip certificate validation for HTTPS connection (default: $false)
+    
+    # Task management
+    Wait                 = $true                              # Wait for VM creation tasks to complete (default: $false)
+    TimeoutSeconds       = 600                                # Timeout for task completion in seconds (default: 300)
+}
+# Call the function using splatting
+$newVM = New-ScaleHCOSVM @vmParams -Credential ($Credential) -Server $Server
+$newVM
+```
+
+### Get a VM Name and make a snapshot
+Use `Get-ScaleHCOSVMInventory` to find a VM's UUID by friendly name and pass the UUID to the Snapshot function.
+
+```powershell
+$VMtoSnap = (Get-ScaleHCOSVMInventory -Server $Server -Credential $Credential  -Name "SiteController_Store102").UUID
+
+New-ScaleHCOSVMSnapshot -Server $Server -Credential $Credential -vmUUID $VMtoSnap -SnapshotLabel "Test Snap"
 ```
 
 # Core Functions
