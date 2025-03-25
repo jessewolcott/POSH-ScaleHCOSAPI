@@ -1268,6 +1268,98 @@ function New-ScaleHCOSVM {
     }
 }
 
+function New-ScaleHCOSVMSnapshot {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [string]$vmUUID,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+        
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$SnapshotLabel = "Snapshot created via PowerShell module",
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck,
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$Wait,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$TimeoutSeconds = 300
+    )
+    
+    begin {
+        Write-ScaleHCOSLog -Message "Starting VM snapshot creation process" -Level 'Info'
+        $ScaleCluster = "https://$Server/rest/v1"
+    }
+    
+    process {
+        try {
+            Write-ScaleHCOSLog -Message "Creating snapshot for VM with UUID: $vmUUID" -Level 'Info'
+            Write-Host "Create VM snapshot"
+            
+            # Build the request body
+            $body = @{
+                domainUUID = $vmUUID
+                label = $SnapshotLabel
+            }
+            
+            # Set up parameters for Invoke-ScaleHCOSRequest
+            $params = @{
+                Uri = "$ScaleCluster/VirDomainSnapshot"
+                Credential = $Credential
+                Method = 'POST'
+                Body = $body
+                SkipCertificateCheck = $SkipCertificateCheck
+            }
+            
+            # Execute the request using Invoke-ScaleHCOSRequest
+            $result = Invoke-ScaleHCOSRequest @params
+            
+            # Get the snapshot UUID from the result
+            $snapUUID = $result.createdUUID
+            $taskTag = $result.taskTag
+            
+            Write-ScaleHCOSLog -Message "Snapshot creation initiated for VM $vmUUID. Snapshot UUID: $snapUUID, TaskTag: $taskTag" -Level 'Info'
+            
+            # Wait for task to complete if Wait is specified
+            if ($Wait -and $taskTag) {
+                Write-ScaleHCOSLog -Message "Waiting for snapshot creation task to complete (TaskTag: $taskTag)" -Level 'Info'
+                
+                Wait-ScaleTask -TaskTag $taskTag -Server $Server -Credential $Credential -TimeoutSeconds $TimeoutSeconds -SkipCertificateCheck:$SkipCertificateCheck
+            }
+            
+            # Return snapshot details
+            $snapshotDetails = [PSCustomObject]@{
+                VMUUID = $vmUUID
+                SnapshotUUID = $snapUUID
+                SnapshotLabel = $SnapshotLabel
+                TaskTag = $taskTag
+                Server = $Server
+                CreationTime = Get-Date
+            }
+            
+            Write-ScaleHCOSLog -Message "Snapshot creation process completed for VM $vmUUID" -Level 'Info'
+            return $snapshotDetails
+        }
+        catch {
+            $errorMessage = "Failed to create VM snapshot: $_"
+            Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+            throw $_
+        }
+    }
+    
+    end {
+        Write-ScaleHCOSLog -Message "VM snapshot creation process finished" -Level 'Info'
+    }
+}
 
 try {
     Initialize-ScaleHCOSEnvironment
@@ -1277,4 +1369,4 @@ try {
 }
 
 # Export module members - now including all functions
-Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM
+Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, New-ScaleHCOSVMSnapshot, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM
