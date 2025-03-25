@@ -123,7 +123,7 @@ function Register-ScaleHCOSCredentials {
         [string]$Password,
         
         [Parameter(Mandatory = $false)]
-        [string]$Role,
+        [string]$FriendlyName,
 
         [Parameter(Mandatory = $false)]
         [string]$EncryptionKeyFile,
@@ -138,12 +138,12 @@ function Register-ScaleHCOSCredentials {
     # Initialize environment
     Initialize-ScaleHCOSEnvironment
     
-    # Either use provided Role or prompt for it
-    if ([string]::IsNullOrWhiteSpace($Role)) {
-        $roleName = Read-Host -Prompt "Enter a name for this user. You can also add descriptors. (e.g., OrgAdmin, ReadOnly)"
+    # Either use provided FriendlyName or prompt for it
+    if ([string]::IsNullOrWhiteSpace($FriendlyName)) {
+        $credentialName = Read-Host -Prompt "Enter a friendly name for this credential (e.g., OrgAdmin, ReadOnly)"
     } else {
-        $roleName = $Role
-        Write-ScaleHCOSLog -Message "Using provided role name: $roleName" -Level 'Info'
+        $credentialName = $FriendlyName
+        Write-ScaleHCOSLog -Message "Using provided friendly name: $credentialName" -Level 'Info'
     }
     
     # Either use provided credentials or prompt for them
@@ -197,18 +197,18 @@ function Register-ScaleHCOSCredentials {
         }
         
         # Save encrypted credential to file
-        $credentialFile = Join-Path -Path $script:CredentialFolder -ChildPath "$roleName.cred"
+        $credentialFile = Join-Path -Path $script:CredentialFolder -ChildPath "$credentialName.cred"
         $encryptedCredential | Set-Content -Path $credentialFile -Force
         
-        Write-ScaleHCOSLog -Message "Credentials stored successfully for role: $roleName" -Level 'Info'
-        Write-Host "Credentials stored successfully for role: $roleName" -ForegroundColor Green
+        Write-ScaleHCOSLog -Message "Credentials stored successfully with friendly name: $credentialName" -Level 'Info'
+        Write-Host "Credentials stored successfully with friendly name: $credentialName" -ForegroundColor Green
         
         # Add to the in-memory credentials dictionary
-        $script:Credentials[$roleName] = $credentialFile
+        $script:Credentials[$credentialName] = $credentialFile
         
         # Return success information
         return [PSCustomObject]@{
-            Role = $roleName
+            FriendlyName = $credentialName
             Username = $Username
             CredentialFile = $credentialFile
             Status = "Success"
@@ -260,16 +260,19 @@ function Get-ScaleHCOSCredentials {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [string]$Name
+        [string]$FriendlyName,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Username
     )
     
-    # If no name is provided, return all credentials
-    if ([string]::IsNullOrWhiteSpace($Name)) {
+    # If no name or username is provided, return all credentials
+    if ([string]::IsNullOrWhiteSpace($FriendlyName) -and [string]::IsNullOrWhiteSpace($Username)) {
         $results = @{}
         
         # Loop through all credential entries
         foreach ($credentialEntry in $script:Credentials.GetEnumerator()) {
-            $roleName = $credentialEntry.Key
+            $credName = $credentialEntry.Key
             $credentialFile = $credentialEntry.Value
             
             try {
@@ -283,7 +286,7 @@ function Get-ScaleHCOSCredentials {
                         # For non-Windows PS Core, we need the encryption key file
                         $keyFilePath = Join-Path -Path $script:CredentialFolder -ChildPath "encryption.key"
                         if (-not (Test-Path -Path $keyFilePath)) {
-                            Write-Warning "Encryption key file not found for role '$roleName'. Skipping."
+                            Write-Warning "Encryption key file not found for credential '$credName'. Skipping."
                             continue
                         }
                         
@@ -298,35 +301,88 @@ function Get-ScaleHCOSCredentials {
                     $credential = [System.Management.Automation.PSSerializer]::Deserialize($credentialXml)
                     
                     # Add to results with role as key and credential as value
-                    $results[$roleName] = [PSCustomObject]@{
-                        Role = $roleName
+                    $results[$credName] = [PSCustomObject]@{
+                        FriendlyName = $credName
                         Username = $credential.UserName
                         Credential = $credential
                         Path = $credentialFile
                     }
                 } else {
-                    Write-Warning "Credential file for role '$roleName' not found at: $credentialFile"
+                    Write-Warning "Credential file for '$credName' not found at: $credentialFile"
                 }
             } catch {
-                Write-Warning "Failed to load credential for role '$roleName': $_"
+                Write-Warning "Failed to load credential for '$credName': $_"
             }
         }
         
         # Return results as array of custom objects
-        return $results.Values | Sort-Object Role
+        return $results.Values | Sort-Object FriendlyName
     }
+    # If username is provided, filter by username
+    elseif (-not [string]::IsNullOrWhiteSpace($Username)) {
+        $matchingCredentials = @()
+        
+        # Loop through all credential entries
+        foreach ($credentialEntry in $script:Credentials.GetEnumerator()) {
+            $credName = $credentialEntry.Key
+            $credentialFile = $credentialEntry.Value
+            
+            try {
+                # Check if file exists
+                if (Test-Path -Path $credentialFile) {
+                    # Read the encrypted credential from file
+                    $encryptedCredential = Get-Content -Path $credentialFile
+                    
+                    # Decrypt the credential data
+                    if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
+                        # For non-Windows PS Core, we need the encryption key file
+                        $keyFilePath = Join-Path -Path $script:CredentialFolder -ChildPath "encryption.key"
+                        if (-not (Test-Path -Path $keyFilePath)) {
+                            Write-Warning "Encryption key file not found for credential '$credName'. Skipping."
+                            continue
+                        }
+                        
+                        $keyBytes = Get-Content -Path $keyFilePath -Encoding Byte -Raw
+                        $credentialXml = Unprotect-Data -EncryptedData $encryptedCredential -Key $keyBytes
+                    } else {
+                        # Windows can use DPAPI
+                        $credentialXml = Unprotect-Data -EncryptedData $encryptedCredential
+                    }
+                    
+                    # Deserialize the credential object
+                    $credential = [System.Management.Automation.PSSerializer]::Deserialize($credentialXml)
+                    
+                    # If username matches, add to results
+                    if ($credential.UserName -eq $Username) {
+                        # Return the PSCredential object directly for pipeline compatibility
+                        $matchingCredentials += $credential
+                    }
+                }
+            } catch {
+                Write-Warning "Failed to load credential for '$credName': $_"
+            }
+        }
+        
+        # Return the matching credential object(s)
+        if ($matchingCredentials.Count -gt 0) {
+            return $matchingCredentials
+        } else {
+            Write-Warning "No credentials found with username '$Username'."
+            return $null
+        }
+    }
+    # Original functionality for retrieving a single credential by friendly name
     else {
-        # Original functionality for retrieving a single credential
-        $credentialFile = $script:Credentials[$Name]
+        $credentialFile = $script:Credentials[$FriendlyName]
         if (-not $credentialFile) {
-            $errorMessage = "Credentials for role '$Name' not found. Please register them first using Register-ScaleCredentials."
+            $errorMessage = "Credentials with friendly name '$FriendlyName' not found. Please register them first using Register-ScaleHCOSCredentials."
             Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
             throw $errorMessage
         }
         
         # Check if this is a valid file path
         if (-not (Test-Path -Path $credentialFile)) {
-            $errorMessage = "Credential file for role '$Name' not found at: $credentialFile"
+            $errorMessage = "Credential file for friendly name '$FriendlyName' not found at: $credentialFile"
             Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
             throw $errorMessage
         }
@@ -353,6 +409,7 @@ function Get-ScaleHCOSCredentials {
             # Deserialize the credential object
             $credential = [System.Management.Automation.PSSerializer]::Deserialize($credentialXml)
             
+            # Return the PSCredential object directly for pipeline compatibility
             return $credential
         }
         catch {
@@ -404,10 +461,10 @@ function Remove-ScaleHCOSCredentials {
     [CmdletBinding(SupportsShouldProcess)]
     param (
         [Parameter(Mandatory = $false)]
-        [string]$Name,
+        [string]$FriendlyName,
         
         [Parameter(Mandatory = $false)]
-        [string]$Role,
+        [string]$Username,
         
         [Parameter(Mandatory = $false)]
         [switch]$Force,
@@ -418,47 +475,108 @@ function Remove-ScaleHCOSCredentials {
     
     $script:EnableLogging = $EnableLogging
     
-    # Use Role parameter if provided, otherwise use Name
-    $credentialName = if (-not [string]::IsNullOrWhiteSpace($Role)) { $Role } else { $Name }
-    
-    # Check if a credential name was provided
-    if ([string]::IsNullOrWhiteSpace($credentialName)) {
-        $errorMessage = "Either -Name or -Role parameter must be specified."
+    # Check if criteria were provided
+    if ([string]::IsNullOrWhiteSpace($FriendlyName) -and [string]::IsNullOrWhiteSpace($Username)) {
+        $errorMessage = "Either -FriendlyName or -Username parameter must be specified."
         Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
         Write-Error $errorMessage
         return
     }
     
-    $credentialFile = $script:Credentials[$credentialName]
-    if (-not $credentialFile) {
-        $warningMessage = "Credentials for role '$credentialName' not found."
-        Write-ScaleHCOSLog -Message $warningMessage -Level 'Warning'
-        Write-Warning $warningMessage
-        return
-    }
-    
-    # Check if the credential file exists
-    if (Test-Path -Path $credentialFile) {
-        # Remove the file
-        if ($Force -or $PSCmdlet.ShouldProcess($credentialFile, "Delete credential file")) {
+    # If username is provided, find matching credentials
+    if (-not [string]::IsNullOrWhiteSpace($Username)) {
+        $matchingCredentials = @()
+        
+        foreach ($credentialEntry in $script:Credentials.GetEnumerator()) {
+            $credName = $credentialEntry.Key
+            $credentialFile = $credentialEntry.Value
+            
             try {
-                Remove-Item -Path $credentialFile -Force -ErrorAction Stop
-                Write-ScaleHCOSLog -Message "Credential file for '$credentialName' has been deleted." -Level 'Info'
+                if (Test-Path -Path $credentialFile) {
+                    $encryptedCredential = Get-Content -Path $credentialFile
+                    
+                    if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
+                        $keyFilePath = Join-Path -Path $script:CredentialFolder -ChildPath "encryption.key"
+                        if (-not (Test-Path -Path $keyFilePath)) {
+                            Write-Warning "Encryption key file not found for credential '$credName'. Skipping."
+                            continue
+                        }
+                        
+                        $keyBytes = Get-Content -Path $keyFilePath -Encoding Byte -Raw
+                        $credentialXml = Unprotect-Data -EncryptedData $encryptedCredential -Key $keyBytes
+                    } else {
+                        $credentialXml = Unprotect-Data -EncryptedData $encryptedCredential
+                    }
+                    
+                    $credential = [System.Management.Automation.PSSerializer]::Deserialize($credentialXml)
+                    
+                    if ($credential.UserName -eq $Username) {
+                        $matchingCredentials += $credName
+                    }
+                }
             } catch {
-                $errorMessage = "Failed to delete credential file: $_"
-                Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
-                Write-Error $errorMessage
-                return
+                Write-Warning "Failed to check credential for username match: $_"
             }
         }
+        
+        if ($matchingCredentials.Count -eq 0) {
+            Write-Warning "No credentials found with username '$Username'."
+            return
+        }
+        
+        foreach ($credName in $matchingCredentials) {
+            $credentialFile = $script:Credentials[$credName]
+            
+            if (Test-Path -Path $credentialFile) {
+                if ($Force -or $PSCmdlet.ShouldProcess($credentialFile, "Delete credential file for $credName")) {
+                    try {
+                        Remove-Item -Path $credentialFile -Force -ErrorAction Stop
+                        Write-ScaleHCOSLog -Message "Credential file for '$credName' has been deleted." -Level 'Info'
+                        
+                        # Remove from the in-memory dictionary
+                        $script:Credentials.Remove($credName)
+                        Write-ScaleHCOSLog -Message "Credentials for '$credName' have been removed from memory." -Level 'Info'
+                        Write-Host "Credentials for friendly name '$credName' have been removed successfully." -ForegroundColor Green
+                    } catch {
+                        $errorMessage = "Failed to delete credential file: $_"
+                        Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+                        Write-Error $errorMessage
+                    }
+                }
+            }
+        }
+    } else {
+        # Remove credential by friendly name
+        $credentialFile = $script:Credentials[$FriendlyName]
+        if (-not $credentialFile) {
+            $warningMessage = "Credentials for friendly name '$FriendlyName' not found."
+            Write-ScaleHCOSLog -Message $warningMessage -Level 'Warning'
+            Write-Warning $warningMessage
+            return
+        }
+        
+        # Check if the credential file exists
+        if (Test-Path -Path $credentialFile) {
+            # Remove the file
+            if ($Force -or $PSCmdlet.ShouldProcess($credentialFile, "Delete credential file")) {
+                try {
+                    Remove-Item -Path $credentialFile -Force -ErrorAction Stop
+                    Write-ScaleHCOSLog -Message "Credential file for '$FriendlyName' has been deleted." -Level 'Info'
+                } catch {
+                    $errorMessage = "Failed to delete credential file: $_"
+                    Write-ScaleHCOSLog -Message $errorMessage -Level 'Error'
+                    Write-Error $errorMessage
+                    return
+                }
+            }
+        }
+        
+        # Remove from the in-memory dictionary
+        $script:Credentials.Remove($FriendlyName)
+        Write-ScaleHCOSLog -Message "Credentials for friendly name '$FriendlyName' have been removed from memory." -Level 'Info'
+        Write-Host "Credentials for friendly name '$FriendlyName' have been removed successfully." -ForegroundColor Green
     }
-    
-    # Remove from the in-memory dictionary
-    $script:Credentials.Remove($credentialName)
-    Write-ScaleHCOSLog -Message "Credentials for role '$credentialName' have been removed from memory." -Level 'Info'
-    Write-Host "Credentials for role '$credentialName' have been removed successfully." -ForegroundColor Green
 }
-
 
 function Invoke-ScaleHCOSRequest {
     [CmdletBinding()]
@@ -467,7 +585,9 @@ function Invoke-ScaleHCOSRequest {
         [string]$Uri,
         
         [Parameter(Mandatory = $true)]
-        [string]$Role,
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential, 
         
         [Parameter(Mandatory = $false)]
         [Microsoft.PowerShell.Commands.WebRequestMethod]$Method = 'GET',
@@ -488,15 +608,11 @@ function Invoke-ScaleHCOSRequest {
         [int]$TimeoutSeconds = 300
     )
     
-    # Initialize credential and other variables
-    Write-Verbose "Getting credentials for role: $Role"
-    $credential = Get-ScaleHCOSCredentials -Name $Role
-    
     # Build REST options hashtable
     $restOpts = @{
         Uri = $Uri
         Method = $Method
-        Credential = $credential
+        Credential = $Credential
         ContentType = 'application/json'
         TimeoutSec = $TimeoutSeconds
     }
@@ -560,8 +676,8 @@ function Invoke-ScaleHCOSRequest {
         # Log successful completion
         Write-ScaleHCOSLog -Message "REST request completed successfully" -Level 'Info'
         
-        # Explicitly output the response
-        $response
+        # Return the response
+        return $response
     }
     catch {
         $errorMessage = "REST request failed: $_"
@@ -577,7 +693,9 @@ function Get-ScaleHCOSNodeInventory {
         [string]$Server,
         
         [Parameter(Mandatory = $false)]
-        [string]$Role = "Administrator",
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
         
         [Parameter(Mandatory = $false)]
         [switch]$SkipCertificateCheck
@@ -591,7 +709,7 @@ function Get-ScaleHCOSNodeInventory {
         # Get node information
         $params = @{
             Uri = "$ScaleCluster/Node"
-            Role = $Role
+            Credential = $Credential  # Use Credential parameter
             Method = 'GET'
         }
         
@@ -705,7 +823,9 @@ function Get-ScaleHCOSVMInventory {
         [string]$Server,
         
         [Parameter(Mandatory = $false)]
-        [string]$Role = "Administrator",
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
         
         [Parameter(Mandatory = $false)]
         [switch]$SkipCertificateCheck,
@@ -738,7 +858,7 @@ function Get-ScaleHCOSVMInventory {
         # Get VM information
         $params = @{
             Uri = "$ScaleCluster/VirDomain"
-            Role = $Role
+            Credential = $Credential
             Method = 'GET'
         }
         
@@ -826,7 +946,9 @@ function New-ScaleHCOSVM {
         [string]$Server,
         
         [Parameter(Mandatory = $false)]
-        [string]$Role = "Administrator",
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
         
         [Parameter(Mandatory = $true)]
         [string]$Name,
@@ -956,7 +1078,7 @@ function New-ScaleHCOSVM {
         
         $params = @{
             Uri = "$ScaleCluster/VirDomain"
-            Role = $Role
+            Credential = $Credential
             Method = 'POST'
             Body = $vmRequest
         }
@@ -987,7 +1109,7 @@ function New-ScaleHCOSVM {
             while (-not $taskComplete -and (Get-Date) -lt $endTime) {
                 $taskParams = @{
                     Uri = "$ScaleCluster/TaskTag/$taskTag"
-                    Role = $Role
+                    Credential = $Credential
                     Method = 'GET'
                 }
                 
@@ -1049,7 +1171,7 @@ function New-ScaleHCOSVM {
             
             $diskParams = @{
                 Uri = "$ScaleCluster/VirDomainBlockDevice"
-                Role = $Role
+                Credential = $Credential
                 Method = 'POST'
                 Body = $diskRequest
             }
@@ -1071,7 +1193,7 @@ function New-ScaleHCOSVM {
                 while (-not $diskTaskComplete -and (Get-Date) -lt $diskEndTime) {
                     $diskTaskParams = @{
                         Uri = "$ScaleCluster/TaskTag/$diskTaskTag"
-                        Role = $Role
+                        Credential = $Credential
                         Method = 'GET'
                     }
                     
@@ -1146,8 +1268,6 @@ function New-ScaleHCOSVM {
     }
 }
 
-# Add the new function to the module exports
-Export-ModuleMember -Function New-ScaleHCOSVM
 
 try {
     Initialize-ScaleHCOSEnvironment
