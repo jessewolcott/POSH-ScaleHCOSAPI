@@ -129,6 +129,7 @@ New-ScaleHCOSVMSnapshot -Server $Server -Credential $Credential -vmUUID $VMtoSna
 | Get-ScaleHCOSLocalUser| Retrieves local users in a Scale cluster |
 | Get-ScaleHCOSLocalUserRole | Retrieves local user roles in a Scale cluster |
 | Get-ScaleHCOSRegistration | Retrieves registration information in a Scale cluster |
+| Get-ScaleHCOSTimeZone | Retrieves time zone set on a Scale cluster |
 
 ## Advanced Usage
 ### Handling Self-Signed Certificates
