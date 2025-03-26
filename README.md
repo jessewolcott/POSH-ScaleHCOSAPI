@@ -126,6 +126,8 @@ New-ScaleHCOSVMSnapshot -Server $Server -Credential $Credential -vmUUID $VMtoSna
 | Get-ScaleHCOSVMInventory | Lists and filters virtual machines in a Scale cluster |
 | New-ScaleHCOSVM | Creates a new virtual machine with specified configuration |
 | New-ScaleHCOSVMSnapshot | Creates a snapshot of a virtual machine |
+| Get-ScaleHCOSLocalUser| Retrieves local users in a Scale cluster |
+| Get-ScaleHCOSLocalUserRole | Retrieves local user roles in a Scale cluster |
 
 ## Advanced Usage
 ### Handling Self-Signed Certificates

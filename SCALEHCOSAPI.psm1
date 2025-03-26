@@ -1361,6 +1361,81 @@ function New-ScaleHCOSVMSnapshot {
     }
 }
 
+function Get-ScaleHCOSLocalUser {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck
+    )
+
+    try {
+        # Define the parameters for the Invoke-ScaleHCOSRequest function
+        $Params = @{
+            Uri                 = "https://$Server/rest/v1/User"
+            Credential          = $Credential
+            SkipCertificateCheck = $SkipCertificateCheck
+        }
+
+        # Execute the request
+        $response = Invoke-ScaleHCOSRequest @Params
+
+        # Return the response as an object
+        return $response
+    }
+    catch {
+        # Handle any errors that occur during execution
+        $errorMessage = "Failed to retrieve local user information: $_"
+        Write-Error $errorMessage
+        throw $errorMessage
+    }
+}
+
+function Get-ScaleHCOSLocalUserRole {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck
+    )
+
+    try {
+        # Define the parameters for the Invoke-ScaleHCOSRequest function
+        $Params = @{
+            Uri                 = "https://$Server/rest/v1/Role"
+            Credential          = $Credential
+            SkipCertificateCheck = $SkipCertificateCheck
+        }
+
+        # Execute the request
+        $response = Invoke-ScaleHCOSRequest @Params
+
+        # Return the response as an object
+        return $response
+    }
+    catch {
+        # Handle any errors that occur during execution
+        $errorMessage = "Failed to retrieve local user role information: $_"
+        Write-Error $errorMessage
+        throw $errorMessage
+    }
+}
+
+
 try {
     Initialize-ScaleHCOSEnvironment
 } catch {
@@ -1369,4 +1444,4 @@ try {
 }
 
 # Export module members - now including all functions
-Export-ModuleMember -Function Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, New-ScaleHCOSVMSnapshot, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM
+Export-ModuleMember -Function Get-ScaleHCOSLocalUserRole, Get-ScaleHCOSLocalUser, Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, New-ScaleHCOSVMSnapshot, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM
