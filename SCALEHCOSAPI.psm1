@@ -1435,6 +1435,72 @@ function Get-ScaleHCOSLocalUserRole {
     }
 }
 
+function Get-ScaleHCOSRegistration {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Server,
+
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential]
+        [System.Management.Automation.Credential()]
+        $Credential,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipCertificateCheck
+    )
+
+    try {
+        # Define the parameters for the Invoke-ScaleHCOSRequest function
+        $Params = @{
+            Uri                 = "https://$Server/rest/v1/Registration"
+            Credential          = $Credential
+            SkipCertificateCheck = $SkipCertificateCheck
+        }
+
+        # Execute the request
+        $response = Invoke-ScaleHCOSRequest @Params
+        [xml]$xmlResponse = $response.clusterData
+        # Process the response and create a PSCustomObject for readability
+        $formattedResult = [PSCustomObject]@{
+            UUID                = $response.uuid
+            CompanyName         = $response.companyName
+            Contact             = $response.contact
+            Phone               = $response.phone
+            Email               = $response.email
+            ClusterID           = $response.clusterID
+            ClusterName         = $xmlresponse.registration.clusterName
+            ClusterVersion      = $xmlresponse.registration.version
+<#
+            NodeInfo            = $response.clusterData.registration.nodeInfo.node | ForEach-Object {
+                [PSCustomObject]@{
+                    Manufacturer       = $_.'system-manufacturer'
+                    ProductName        = $_.'system-product-name'
+                    SerialNumber       = $_.'system-serial-number'
+                    UUID               = $_.'system-uuid'
+                    ProcessorFamily    = $_.'processor-family'
+                    ProcessorFrequency = $_.'processor-frequency'
+                    ProcessorVersion   = $_.'processor-version'
+                    RAMSize            = $_.'memSize'
+                }
+            }#> # enumerate each node and list as node 1, node 2, etc
+            "Contact Name"             = $xmlResponse.registration.contactList.item.name
+            "Contact Phone"            = $xmlResponse.registration.contactList.item.phone
+            "Contact Email"            = $xmlResponse.registration.contactList.item.email
+            ClusterDataHash     = $response.clusterDataHash
+            ClusterDataHashAccepted = $response.clusterDataHashAccepted
+        }
+
+        # Return the formatted result
+        return $formattedResult
+    }
+    catch {
+        # Handle any errors that occur during execution
+        $errorMessage = "Failed to retrieve registration information: $_"
+        Write-Error $errorMessage
+        throw $errorMessage
+    }
+}
 
 try {
     Initialize-ScaleHCOSEnvironment
@@ -1444,4 +1510,4 @@ try {
 }
 
 # Export module members - now including all functions
-Export-ModuleMember -Function Get-ScaleHCOSLocalUserRole, Get-ScaleHCOSLocalUser, Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, New-ScaleHCOSVMSnapshot, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM
+Export-ModuleMember -Function Get-ScaleHCOSRegistration, Get-ScaleHCOSLocalUserRole, Get-ScaleHCOSLocalUser, Register-ScaleHCOSCredentials, Get-ScaleHCOSCredentials, Remove-ScaleHCOSCredentials, Invoke-ScaleHCOSRequest, Get-ScaleHCOSNodeInventory, New-ScaleHCOSVMSnapshot, Get-ScaleHCOSVMInventory, New-ScaleHCOSVM

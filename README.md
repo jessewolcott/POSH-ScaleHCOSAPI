@@ -128,6 +128,7 @@ New-ScaleHCOSVMSnapshot -Server $Server -Credential $Credential -vmUUID $VMtoSna
 | New-ScaleHCOSVMSnapshot | Creates a snapshot of a virtual machine |
 | Get-ScaleHCOSLocalUser| Retrieves local users in a Scale cluster |
 | Get-ScaleHCOSLocalUserRole | Retrieves local user roles in a Scale cluster |
+| Get-ScaleHCOSRegistration | Retrieves registration information in a Scale cluster |
 
 ## Advanced Usage
 ### Handling Self-Signed Certificates
