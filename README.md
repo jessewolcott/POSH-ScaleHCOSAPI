@@ -157,3 +157,36 @@ The module includes built-in logging functionality. Logs are stored in the Logs 
 # Todo List
 * There are so, so many features missing and workflows missing. 
 * Mac OS / Linux testing
+* Build AlertEmailTarget
+* Build AlertSMTPConfig
+* Build AlertSyslogTarget
+* Build Certificate
+* Build Cluster
+* Build ClusterRegistrationData - This is in /Registration so maybe we don't care about this
+* Build Condition
+* Build default - ping, login, logout
+* Build DNSConfig
+* Build Drive
+* Build GPU
+* Build GPUProfile
+* Build ISO
+* Build MonitoringConfig
+* Build Node
+* Build NucleusKey
+* Build OIDCConfig
+* Build Registration - Still need to do Post, Patch, Delete
+* Build RemoteClusterConnection
+* Build Role
+* Build TimeSource
+* Build TimeZone
+* Build Update
+* Build User - Still need to do Post, Patch, Delete
+* Build VirDomain - Still have a TON of work to do to make this good
+* Build VirDomainBlockDevice
+* Build VirDomainNetDevice
+* Build VirDomainReplication
+* Build VirDomainSnapshot
+* Build VirDomainSnapshotSchedule
+* Build VirDomainStats
+* Build VirtualDisk
+
