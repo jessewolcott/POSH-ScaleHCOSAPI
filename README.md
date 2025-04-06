@@ -156,38 +156,41 @@ The module includes built-in logging functionality. Logs are stored in the Logs 
 * Appropriate user permissions on the Scale Computing platform
 
 # Todo List
-* There are so, so many features missing and workflows missing. 
-* Mac OS / Linux testing
-* Build AlertEmailTarget
-* Build AlertSMTPConfig
-* Build AlertSyslogTarget
-* Build Certificate
-* Build Cluster
-* Build ClusterRegistrationData - This is in /Registration so maybe we don't care about this
-* Build Condition
-* Build default - ping, login, logout
-* Build DNSConfig
-* Build Drive
-* Build GPU
-* Build GPUProfile
-* Build ISO
-* Build MonitoringConfig
-* Build Node
-* Build NucleusKey
-* Build OIDCConfig
-* Build Registration - Still need to do Post, Patch, Delete
-* Build RemoteClusterConnection
-* Build Role
-* Build TimeSource
-* Build TimeZone
-* Build Update
-* Build User - Still need to do Post, Patch, Delete
-* Build VirDomain - Still have a TON of work to do to make this good
-* Build VirDomainBlockDevice
-* Build VirDomainNetDevice
-* Build VirDomainReplication
-* Build VirDomainSnapshot
-* Build VirDomainSnapshotSchedule
-* Build VirDomainStats
-* Build VirtualDisk
+There are so, so many features missing and workflows missing. 
+
+| Feature | Status | Notes | 
+| --- | --- | --- |
+| Mac OS / Linux testing | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build AlertEmailTarget | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build AlertSMTPConfig | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build AlertSyslogTarget | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Certificate | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Cluster | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build ClusterRegistrationData  | ![Planned](https://img.shields.io/badge/status-planned-blue) |  This is in /Registration so maybe we don't care about this |
+| Build Condition | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build default - ping, login, logout | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build DNSConfig | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Drive | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build GPU | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build GPUProfile | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build ISO | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build MonitoringConfig | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Node | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build NucleusKey | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build OIDCConfig | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Registration - Still need to do Post, Patch, Delete | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build RemoteClusterConnection | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Role | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build TimeSource | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build TimeZone | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build Update | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build User - Still need to do Post, Patch, Delete | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomain - Still have a TON of work to do to make this good | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomainBlockDevice | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomainNetDevice | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomainReplication | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomainSnapshot | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomainSnapshotSchedule | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirDomainStats | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
+| Build VirtualDisk | ![Planned](https://img.shields.io/badge/status-planned-blue) | |
 
